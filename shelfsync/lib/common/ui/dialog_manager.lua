@@ -19,8 +19,10 @@ function DialogManager:new(o)
   return setmetatable(o or {}, self)
 end
 
-function DialogManager:buildSearchDialog(title, items, active_item, book_callback, search_callback, search)
+function DialogManager:buildSearchDialog(title, items, active_item, book_callback, search_callback, search, close_callback)
+  local selection_made = false
   local callback = function(book)
+    selection_made = true
     self.search_dialog:onClose()
     -- Tapping a result fires this straight from the menu widget's own event
     -- dispatch, not from inside showLinkBookDialog's Trapper:wrap() (that
@@ -42,7 +44,12 @@ function DialogManager:buildSearchDialog(title, items, active_item, book_callbac
     active_item = active_item,
     select_book_cb = callback,
     search_callback = search_callback,
-    search_value = search
+    search_value = search,
+    close_callback = function()
+      if not selection_made and close_callback then
+        close_callback()
+      end
+    end,
   }
 
   UIManager:show(self.search_dialog)
