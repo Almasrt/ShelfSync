@@ -4,6 +4,7 @@ local logger = require("shelfsync/lib/common/safe_logger")
 
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
+local Trapper = require("ui/trapper")
 
 local Book = require("shelfsync/lib/common/book")
 
@@ -37,8 +38,11 @@ function StoryGraph:showChangeEditionDialog(callback)
   )
 end
 
-function StoryGraph:linkBook(book, link_method)
-  local filename = self.ui.document.file
+function StoryGraph:linkBook(book, link_method, target_filename, options)
+  local filename = target_filename or (self.ui.document and self.ui.document.file)
+  if not filename then
+    return false
+  end
 
   -- 1. Fetch remote status (API handles redirection and audio filtering internally)
   local status, lookup_error = self.api:findUserBook(book.book_id)
@@ -84,7 +88,7 @@ function StoryGraph:linkBook(book, link_method)
       text = _("Linked, but couldn't check the book's status on StoryGraph, so it wasn't marked as Currently Reading automatically. Use \"Update status\" to set it manually."),
       icon = "notice-warning",
     })
-  elseif not self.state.book_status.status_id then
+  elseif not (options and options.suppress_auto_reading_status) and not self.state.book_status.status_id then
     logger.info("StoryGraph: Book has no status on any edition, adding to Currently Reading automatically")
     local added = self.api:updateUserBook(book.book_id, STORYGRAPH.STATUS.READING)
     if added and added.status_id then
@@ -103,6 +107,76 @@ function StoryGraph:linkBook(book, link_method)
     end
   end
 
+  return true
+end
+
+function StoryGraph:showBookshelfRatingLinkDialog(filename, title, authors, on_linked, on_cancel)
+  if type(filename) ~= "string" or filename == "" or type(title) ~= "string" or title == "" then
+    UIManager:show(InfoMessage:new {
+      text = _("Cannot search StoryGraph because this book has no usable title."),
+      icon = "notice-warning",
+    })
+    if on_cancel then on_cancel() end
+    return false
+  end
+
+  authors = type(authors) == "string" and authors or ""
+
+  self.wifi:withWifi(function(_wifi_enabled, wifi_error)
+    if wifi_error then
+      UIManager:show(InfoMessage:new {
+        text = _("Could not connect to StoryGraph to search for this book."),
+        icon = "notice-warning",
+      })
+      if on_cancel then on_cancel() end
+      return
+    end
+
+    local results, err = self.api:findBooks(title, authors, self.user:getId())
+    if err then
+      self.dialog_manager:showError(err)
+      if on_cancel then on_cancel() end
+      return
+    end
+    if not results or #results == 0 then
+      UIManager:show(InfoMessage:new {
+        text = _("No StoryGraph matches found. You can link this book manually from ShelfSync."),
+        icon = "notice-warning",
+      })
+      if on_cancel then on_cancel() end
+      return
+    end
+
+    self.dialog_manager:buildSearchDialog(
+      _("Link this book to StoryGraph"),
+      results,
+      {},
+      function(selected_book)
+        local linked = self:linkBook(selected_book, "manual", filename, {
+          suppress_auto_reading_status = true,
+        })
+        if linked and on_linked then
+          on_linked(selected_book.book_id)
+        elseif on_cancel then
+          on_cancel()
+        end
+      end,
+      function(search)
+        local dialog = self.dialog_manager.search_dialog
+        Trapper:wrap(function()
+          local found, search_error = self.api:findBooks(search, authors, self.user:getId())
+          if search_error then
+            self.dialog_manager:showError(search_error)
+          elseif dialog and self.dialog_manager.search_dialog == dialog then
+            dialog:setItems(_("Link this book to StoryGraph"), found or {}, {})
+          end
+        end)
+        return true
+      end,
+      title,
+      on_cancel
+    )
+  end)
   return true
 end
 
@@ -179,6 +253,43 @@ function StoryGraph:submitReview(filename, rating, text)
   end
 
   return self.api:saveReview(book_id, review, review_url) == true
+end
+
+function StoryGraph:submitBookshelfRating(filename, expected_book_id, rating)
+  if not filename or not expected_book_id then
+    return false, "Book is not linked to StoryGraph"
+  end
+
+  local linked_book_id = self.settings:readBookSetting(filename, "book_id")
+    or self.settings:readBookSetting(filename, "edition_id")
+  if tostring(linked_book_id or "") ~= tostring(expected_book_id) then
+    return false, "The local StoryGraph link changed before the rating was sent"
+  end
+
+  local status, lookup_error = self.api:findUserBook(expected_book_id, self.user:getId())
+  if not status or not status.id or tostring(status.id) ~= tostring(expected_book_id) then
+    return false, lookup_error or "The linked StoryGraph book could not be verified"
+  end
+
+  local review_url = status.review_url
+  local review
+  if review_url then
+    review = self.api:getReview(review_url)
+    if not review then
+      return false, "Could not read the existing StoryGraph review; rating was not changed"
+    end
+  else
+    review = {
+      pace = "", driven = "", development = "", loveable = "",
+      diverse = "", flaws = "", themes = "", thoughts = "", mood_ids = {},
+    }
+  end
+
+  review.stars = tonumber(rating) or 0
+  if self.api:saveReview(expected_book_id, review, review_url) ~= true then
+    return false, "StoryGraph did not accept the rating"
+  end
+  return true
 end
 
 return StoryGraph

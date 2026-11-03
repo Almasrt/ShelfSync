@@ -69,6 +69,7 @@ local User = require("shelfsync/lib/common/user")
 local DialogManager = require("shelfsync/lib/common/ui/dialog_manager")
 local CommonMenu = require("shelfsync/lib/common/menu")
 local ReviewMenu = require("shelfsync/lib/common/review_menu")
+local BookshelfRatingBridge = require("shelfsync/lib/storygraph/bookshelf_rating_bridge")
 
 local SETTING = require("shelfsync/lib/common/constants/settings")
 local PROVIDERS = require("shelfsync/lib/common/constants/providers")
@@ -292,6 +293,10 @@ function ShelfSyncApp:init()
 
   self.common_menu = CommonMenu:new { settings = plugin_settings, app = self }
   self.review_menu = ReviewMenu:new { settings = plugin_settings, app = self }
+  self.bookshelf_rating_bridge = BookshelfRatingBridge:new {
+    engine = self.engines.storygraph,
+    state = self.state,
+  }
 
   self:onDispatcherRegisterActions()
   self.ui.menu:registerToMainMenu(self)
@@ -509,6 +514,10 @@ function ShelfSyncApp:onCloseDocument()
   for _, engine in pairs(self.engines) do
     engine:onDocumentClose()
   end
+end
+
+function ShelfSyncApp:onBookshelfRatingChanged(filename, rating, title, authors)
+  return self.bookshelf_rating_bridge:onRatingChanged(filename, rating, title, authors)
 end
 
 function ShelfSyncApp:onSuspend()

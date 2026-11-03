@@ -761,8 +761,8 @@ function StoryGraphApi:getReview(review_url)
     review_url = base_url .. review_url
   end
 
-  local _, html = self:request(review_url, "GET")
-  if not html then return nil end
+  local code, html = self:request(review_url, "GET")
+  if code ~= 200 or not html then return nil end
 
   local root = htmlparser.parse(html, 10000)
   local review = {
