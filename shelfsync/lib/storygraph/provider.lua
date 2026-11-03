@@ -120,7 +120,11 @@ function StoryGraph:showBookshelfRatingLinkDialog(filename, title, authors, on_l
     return false
   end
 
-  authors = type(authors) == "string" and authors or ""
+  if type(authors) == "table" then
+    authors = table.concat(authors, ", ")
+  elseif type(authors) ~= "string" then
+    authors = ""
+  end
 
   self.wifi:withWifi(function(_wifi_enabled, wifi_error)
     if wifi_error then
