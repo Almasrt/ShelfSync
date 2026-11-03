@@ -14,9 +14,13 @@ end
 function BookshelfRatingBridge:onRatingChanged(filename, rating, title, authors)
   if type(filename) ~= "string" or filename == "" then return true end
   if rating ~= nil then
-    rating = tonumber(rating)
-    if not rating or rating < 1 or rating > 5 or rating % 1 ~= 0 then
+    local parsed_rating = tonumber(rating)
+    if parsed_rating == 0 then
+      rating = nil
+    elseif not parsed_rating or parsed_rating < 1 or parsed_rating > 5 or parsed_rating % 1 ~= 0 then
       return true
+    else
+      rating = parsed_rating
     end
   end
 
